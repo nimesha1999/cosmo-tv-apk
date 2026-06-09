@@ -107,14 +107,29 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                // Stay inside the WebView for all cosmo-tv URLs; let the system
-                // handle anything else (mailto:, etc.)
                 String url = req.getUrl().toString();
+                // Allow cosmo-tv app pages
                 if (url.startsWith("https://cosmo-tv.onrender.com") ||
                     url.startsWith("http://cosmo-tv.onrender.com")) {
-                    return false; // load in-app
+                    return false;
                 }
-                return true; // block external links
+                // Allow embed player domains (needed for iframe video players)
+                String[] allowedHosts = {
+                    "vidsrc.to", "vidsrc.cc", "vidsrc.me",
+                    "2embed.cc", "www.2embed.cc",
+                    "player.autoembed.cc", "autoembed.cc",
+                    "embed.su",
+                };
+                String host = req.getUrl().getHost();
+                if (host != null) {
+                    for (String allowed : allowedHosts) {
+                        if (host.equals(allowed) || host.endsWith("." + allowed)) {
+                            return false; // load in-app
+                        }
+                    }
+                }
+                // Block everything else (ads, tracking, external sites)
+                return true;
             }
 
             @Override
@@ -137,34 +152,84 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                // Flush cookies to disk after each page load
                 CookieManager.getInstance().flush();
 
-                // Inject D-pad helper JS so arrow keys move focus between
-                // clickable elements (buttons, links, inputs)
+                // Spatial D-pad navigation: finds the nearest focusable element
+                // in the actual visual direction pressed (up/down/left/right)
                 view.evaluateJavascript(
                     "(function() {" +
                     "  if (window.__dpadReady) return;" +
                     "  window.__dpadReady = true;" +
-                    "  document.addEventListener('keydown', function(e) {" +
-                    "    var els = Array.from(document.querySelectorAll(" +
-                    "      'a,button,input,select,[tabindex]:not([tabindex=\"-1\"])'" +
+
+                    // Get all visible, non-disabled focusable elements
+                    "  function getFocusable() {" +
+                    "    return Array.from(document.querySelectorAll(" +
+                    "      'a[href],button,input:not([type=hidden]),select,textarea,[tabindex]:not([tabindex=\"-1\"])'" +
                     "    )).filter(function(el) {" +
+                    "      if (el.disabled || el.offsetParent === null) return false;" +
                     "      var r = el.getBoundingClientRect();" +
-                    "      return r.width > 0 && r.height > 0 &&" +
-                    "             !el.disabled && el.offsetParent !== null;" +
+                    "      return r.width > 4 && r.height > 4 &&" +
+                    "             r.top < window.innerHeight && r.bottom > 0 &&" +
+                    "             r.left < window.innerWidth && r.right > 0;" +
                     "    });" +
+                    "  }" +
+
+                    // Find the best candidate in the given direction (keyCode)
+                    "  function findNext(cur, dir) {" +
+                    "    var cr = cur.getBoundingClientRect();" +
+                    "    var cx = (cr.left + cr.right) / 2;" +
+                    "    var cy = (cr.top  + cr.bottom) / 2;" +
+                    "    var best = null, bestScore = Infinity;" +
+                    "    getFocusable().forEach(function(el) {" +
+                    "      if (el === cur) return;" +
+                    "      var er = el.getBoundingClientRect();" +
+                    "      var ex = (er.left + er.right) / 2;" +
+                    "      var ey = (er.top  + er.bottom) / 2;" +
+                    "      var dx = ex - cx, dy = ey - cy;" +
+                    // Check element is in the correct half-plane for this direction
+                    "      var ok = (dir===40 && dy>8) || (dir===38 && dy<-8) ||" +
+                    "               (dir===39 && dx>8) || (dir===37 && dx<-8);" +
+                    "      if (!ok) return;" +
+                    // Score: primary-axis distance + 2.5× cross-axis penalty
+                    "      var pri = (dir===40||dir===38) ? Math.abs(dy) : Math.abs(dx);" +
+                    "      var sec = (dir===40||dir===38) ? Math.abs(dx) : Math.abs(dy);" +
+                    "      var score = pri + sec * 2.5;" +
+                    "      if (score < bestScore) { bestScore = score; best = el; }" +
+                    "    });" +
+                    "    return best;" +
+                    "  }" +
+
+                    "  document.addEventListener('keydown', function(e) {" +
+                    "    var k = e.keyCode;" +
+                    // Enter / OK button — click the focused element
+                    "    if (k === 13) {" +
+                    "      var f = document.activeElement;" +
+                    "      if (f && f !== document.body) { f.click(); e.preventDefault(); }" +
+                    "      return;" +
+                    "    }" +
+                    // Arrow keys — spatial navigation
+                    "    if (k !== 37 && k !== 38 && k !== 39 && k !== 40) return;" +
                     "    var cur = document.activeElement;" +
-                    "    var ci = els.indexOf(cur);" +
-                    "    if (e.keyCode === 13 && cur && cur !== document.body) {" +
-                    "      cur.click(); e.preventDefault(); return;" +
+                    // If nothing focused yet, focus first visible element
+                    "    if (!cur || cur === document.body) {" +
+                    "      var first = getFocusable()[0];" +
+                    "      if (first) { first.focus(); e.preventDefault(); }" +
+                    "      return;" +
                     "    }" +
-                    "    if (e.keyCode === 40 && ci < els.length - 1) {" +
-                    "      els[ci + 1].focus(); e.preventDefault();" +
-                    "    } else if (e.keyCode === 38 && ci > 0) {" +
-                    "      els[ci - 1].focus(); e.preventDefault();" +
+                    "    var next = findNext(cur, k);" +
+                    "    if (next) {" +
+                    "      next.focus();" +
+                    "      next.scrollIntoView({ block:'nearest', inline:'nearest' });" +
+                    "      e.preventDefault();" +
                     "    }" +
-                    "  });" +
+                    "  }, true);" + // capture phase so we see keys before the page does
+
+                    // Highlight focused element so user can see where they are
+                    "  var style = document.createElement('style');" +
+                    "  style.textContent = ':focus { outline: 3px solid rgba(255,255,255,0.85) !important;" +
+                    "    outline-offset: 3px !important; border-radius: 6px !important; }';" +
+                    "  document.head.appendChild(style);" +
+
                     "})()",
                     null
                 );
