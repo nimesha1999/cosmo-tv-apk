@@ -20,18 +20,23 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK components
+      - name: Install Android SDK platform + build-tools
         run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          # ubuntu-latest has SDK pre-installed at ANDROID_SDK_ROOT
+          echo "SDK root: $ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          # Accept all licences non-interactively
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          # Install the platform and build tools we need
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "platform-tools"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Generate Gradle Wrapper JAR
-        run: gradle wrapper --gradle-version 8.2 --distribution-type bin
+      - name: Generate Gradle Wrapper
+        run: |
+          chmod +x gradlew || true
+          gradle wrapper --gradle-version 8.4 --distribution-type bin
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
@@ -46,12 +51,12 @@ jobs:
           path: cosmo-tv.apk
           retention-days: 90
 
-      - name: Delete old latest release
-        run: gh release delete latest --yes || true
+      - name: Delete old release (if exists)
+        run: gh release delete latest --yes 2>/dev/null || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release with APK
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -68,7 +73,8 @@ jobs:
 
             **Step 2 — Download & install:**
             1. Open the **Downloader** app on your Fire Stick
-            2. Enter this URL: `https://github.com/nimesha1999/cosmo-tv-apk/releases/download/latest/cosmo-tv.apk`
+            2. Enter this URL:
+               `https://github.com/nimesha1999/cosmo-tv-apk/releases/download/latest/cosmo-tv.apk`
             3. Tap **Go** → **Download** → **Install**
 
             ### What's included:
@@ -77,7 +83,7 @@ jobs:
             - ✅ Play/Pause button on remote works
             - ✅ Fast-forward/Rewind buttons (+10s / -10s)
             - ✅ Back button navigates history
-            - ✅ Videos play inline and go fullscreen
+            - ✅ Videos play inline and go fullscreen automatically
             - ✅ Screen stays on during playback
             - ✅ Login session saved between app restarts
           files: cosmo-tv.apk
