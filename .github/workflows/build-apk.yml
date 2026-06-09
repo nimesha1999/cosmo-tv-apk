@@ -18,43 +18,69 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install SDK components
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.2
+      - name: Generate Gradle Wrapper JAR
+        run: gradle wrapper --gradle-version 8.2 --distribution-type bin
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk cosmo-tv.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cosmo-tv-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          name: cosmo-tv-apk
+          path: cosmo-tv.apk
+          retention-days: 90
 
-      - name: Create Release
+      - name: Delete old latest release
+        run: gh release delete latest --yes || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release with APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Cosmo TV APK
+          name: "Cosmo TV — Fire Stick APK"
           body: |
-            ## Cosmo TV for Fire Stick
+            ## 📺 Cosmo TV for Fire Stick
 
-            Download the APK below and sideload it on your Fire Stick using the Downloader app.
+            ### How to install on your Fire Stick:
 
-            **How to install:**
-            1. On Fire Stick: Settings → My Fire TV → Developer Options → Install Unknown Apps → enable for Downloader
-            2. Open the Downloader app
-            3. Enter this URL and download the APK
-            4. Install it
-          files: app/build/outputs/apk/debug/app-debug.apk
+            **Step 1 — Enable unknown apps (one-time setup):**
+            1. Fire Stick Settings → My Fire TV → Developer Options
+            2. Turn on **Install Unknown Apps**
+            3. Find **Downloader** in the list and enable it
+
+            **Step 2 — Download & install:**
+            1. Open the **Downloader** app on your Fire Stick
+            2. Enter this URL: `https://github.com/nimesha1999/cosmo-tv-apk/releases/download/latest/cosmo-tv.apk`
+            3. Tap **Go** → **Download** → **Install**
+
+            ### What's included:
+            - ✅ Full-screen TV interface
+            - ✅ D-pad navigation (arrow keys move between buttons/links)
+            - ✅ Play/Pause button on remote works
+            - ✅ Fast-forward/Rewind buttons (+10s / -10s)
+            - ✅ Back button navigates history
+            - ✅ Videos play inline and go fullscreen
+            - ✅ Screen stays on during playback
+            - ✅ Login session saved between app restarts
+          files: cosmo-tv.apk
           make_latest: true
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
